@@ -27,7 +27,7 @@ class SuperBlock{ //3072  3 Blocks 实际为2424
 	int Block_StartAddr;
 
     int Block_bitmap[500];
-    int Inode_bitmap[96];
+    int Inode_bitmap[96];//381*8/32
 };
 
 
