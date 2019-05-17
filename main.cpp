@@ -23,6 +23,7 @@ Inode inode_list[MAX_INODE_NUM];
 
  
 
+void initial(){
 
 
 void initial()
