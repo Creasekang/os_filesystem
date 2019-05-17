@@ -1,33 +1,43 @@
 #define _CRT_SECURE_NO_WARNINGS
 
-
+#include<ctime>
 #include<iostream>
+#include<cstring>
+#include<cstdio>
 #include"os.h"
 using namespace std;
 
 void initial();
+void dir(FILE*,Inode*);
 
 int main() {
 	cout << sizeof(SuperBlock) << endl;
 	cout << sizeof(Inode) << endl;
 	cout << sizeof(Dir_item) << endl;
 	
-	
+	SuperBlock t;
+    Inode root_Inode;
 	initial();
-}
 
+    FILE* file;
+	file = fopen("file system.date", "rb+");
+    fseek(file, 0, SEEK_SET);
+    fread(&t, sizeof(SuperBlock), 1, file);
+    t.info_show();
+    fseek(file, INODE_STARTADDR, SEEK_SET);
+    fread(&root_Inode, sizeof(Inode), 1, file);
+    dir(file,&root_Inode);
+    root_Inode.info_show();
+    fclose(file);
+}
 
 //定义用于初始化的对象，用于写入disk文件
 SuperBlock superB;
 Inode inode_list[MAX_INODE_NUM];
 
- 
+
 
 void initial(){
-
-
-void initial()
-{
 
 	char*buff = new char[FILE_SIZE];
 	
@@ -60,9 +70,7 @@ void initial()
 			//初始化bitmap
 	//cout << sizeof(superB.Block_bitmap) << endl << sizeof(superB.Inode_bitmap); //2000, 384
 	memset(superB.Block_bitmap, 0, sizeof(superB.Block_bitmap));
-	memset(superB.Inode_bitmap, 0, sizeof(superB.Inode_bitmap));
-
-	
+	memset(superB.Inode_bitmap, 0, sizeof(superB.Inode_bitmap));	
 
 	//cout << sizeof(inode_list) << endl;  //92*3048=280416
 
@@ -73,40 +81,60 @@ void initial()
 
 	}
 
-
 	//写入disk
-	
-
 	//超级块写入
 	fseek(file, SUPERBLOCK_STARTADDR, SEEK_SET);
 	fwrite(&superB, sizeof(SuperBlock), 1, file);
 	fflush(file);
 
+    //初始化根目录 inode和block
+    Inode root;
+    root.Inode_Id=0;
+    root.file_size=2*DIRITEM_SIZE;
+    root.direct_block[0]=0+BLOCK_STARTADDR;
+    root.occupy_block_num=1;
+    root.undirect_pointer_block=-1;
+    root.create_time=time(NULL);
+    root.isDir=true;
+    strcpy(root.filename,"root");
+    fseek(file, INODE_STARTADDR, SEEK_SET);
+	fwrite(&root, sizeof(Inode), 1, file);
+	fflush(file);
 
-	//inode list 写入
-	for (int i = 0; i < MAX_INODE_NUM; i++)
-	{
-		fseek(file, INODE_STARTADDR+i*INODE_SIZE, SEEK_SET);
-		fwrite(&inode_list[i], sizeof(Inode), 1, file);
-		fflush(file);
-	}
+    Dir_item root_last("..",0,true);
+    Dir_item root_cur(".",0,true);
+    fseek(file, BLOCK_STARTADDR, SEEK_SET);
+	fwrite(&root_last, sizeof(Dir_item), 1, file);
+    fseek(file, BLOCK_STARTADDR+DIRITEM_SIZE, SEEK_SET);
+    fwrite(&root_cur, sizeof(Dir_item), 1, file);
+    fflush(file);
 
+    fclose(file);
 
-	//BLOCK *16000 写入
-	char block[1];  // 1 Byte
-	memset(block,0,sizeof(char));
-	for (int i = 0; i < MAX_BLOCK_NUM; i++)
-	{
-		fseek(file, BLOCK_STARTADDR + i * BLOCK_SIZE, SEEK_SET);
-		fwrite(block, BLOCK_SIZE, 1, file);
-		
-	}
+}
 
-
-	//初始化root目录
-
-
-
-
+void dir(FILE* f,Inode* node){   //半成品，仅适用于未采用间接块的部分
+    int item_num=node->file_size/DIRITEM_SIZE;
+    cout<<setiosflags(ios::left)<<setw(25)<<"Filename"<<setw(10)<<"Inode_Id"<<setw(10)<<"File_size"
+    <<setw(10)<<"isDir_s"<<setw(20)<<"Occupy_block_num"<<setw(15)<<"Create_time"<<endl;
+    if(node->undirect_pointer_block==-1){
+        for(int i=0;i<node->occupy_block_num;++i){
+            int block_st=node->direct_block[i];
+            int num=0;
+            if(i==node->occupy_block_num-1) num=item_num%32;
+            else num=32;
+            for(int j=0;j<num;++j){
+                Dir_item item;
+                Inode attr;
+                fseek(f, block_st+j*DIRITEM_SIZE, SEEK_SET);
+                fread(&item, sizeof(Dir_item), 1, f);
+                if(item.filename=="." || item.filename==".."){
+                    continue;
+                }
+                fseek(f,item.Inode_Id*INODE_SIZE+INODE_STARTADDR,SEEK_SET);
+                fread(&attr, sizeof(Inode), 1, f);
+            }
+        }
+    }
 }
 
