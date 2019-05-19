@@ -101,7 +101,7 @@ public:
     char filename[MAX_FILE_NAME_LENGTH];
     char fill_in;
     bool isDir;
-
+    
     void info_show(){
         string isDir_s;
         if(isDir) isDir_s="True";
