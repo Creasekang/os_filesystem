@@ -15,9 +15,9 @@ void dir(FILE*,Inode*);
 int createFile(SuperBlock&,Inode&,FILE*);
 void cat(FILE*,Inode*);
 void createDir(SuperBlock&,Inode&,FILE*);
-int find_item(FILE* f,Inode* node,string filename,Inode* openFile);
+int find_item(FILE* f,Inode* node,string filename,Inode* openFile);//用于寻找当前目录是否有 “filename”项
 
-vector<string> split(string str,string pattern);
+vector<string> split(string str,string pattern); //分割字符串，用于寻找路径
 
 SuperBlock superB;
 SuperBlock s_block;
@@ -350,7 +350,7 @@ void cat(FILE*f,Inode* node){
     
 }
 
-int find_item(FILE* f,Inode* node,string filename,Inode* openFile){
+int find_item(FILE* f,Inode* node,string filename,Inode* openFile){ //用于寻找当前目录是否有 “filename”项
     int item_num=node->file_size/DIRITEM_SIZE;
     if(node->undirect_pointer_block==-1){
         for(int i=0;i<node->occupy_block_num;++i){
