@@ -9,16 +9,24 @@
 #define MAX_BLOCK_NUM 16000
 #define MAX_INODE_NUM 3048    //381*1024/128=3048
 
+#define MAX_FILE_SIZE 1024*(10+256)
 #define MAX_FILE_NAME_LENGTH 20
 #define SUPERBLOCK_STARTADDR 0  
 #define INODE_STARTADDR 3072    //3*1024
 #define BLOCK_STARTADDR 393216  //384*1024
+#define DIRECT_BLOCK_NUM 10
+#define INT_SIZE 32
+#define INODE_BITMAP_SIZE 96
+#define BLOCK_BITMAP_SIZE 500
 #include<ctime>
 #include<string>
 #include<iostream>
 #include<iomanip>
 #include<string>
 #include<cstdio>
+#include<climits>
+#include<vector>
+
 using namespace std;
 class SuperBlock{ //3072  3 Blocks 实际为2424
 public:
@@ -37,8 +45,8 @@ public:
 	int Inode_StartAddr;
 	int Block_StartAddr;
 
-	int Block_bitmap[500];
-	int Inode_bitmap[96];//381*8/32
+	unsigned int Block_bitmap[500];
+	unsigned int Inode_bitmap[96];//381*8/32
     void info_show(){
         cout<<"Block size : "<<Block_Size<<endl;
         cout<<"Inode size : "<<Inode_Size<<endl;
@@ -49,6 +57,33 @@ public:
         cout<<"Block_StartAddr : "<<Block_StartAddr<<endl;
         cout<<"Free Inode number/Total Inode Number : "<<Total_Free_Inode_Num<<"/"<<Total_Inode_Num<<endl;
         cout<<"Free Block number/Total Inode Number : "<<Total_Free_Block_Num<<"/"<<Total_Block_Num<<endl;
+    }
+    int get_Inode(){
+        for(int i=0;i<INODE_BITMAP_SIZE;++i){
+            for(int j=31;j>=0;--j){
+                //cout<<"Inode : "<<Inode_bitmap[i]<<"  j :"<<j<<endl;
+                if((Inode_bitmap[i]>>j)%2==0){
+                    Inode_bitmap[i]=Inode_bitmap[i]+(1<<(j));
+                    Total_Free_Inode_Num--;
+                    return 31-j+i*32;
+                }
+            }
+        }
+    }
+    vector<int> get_block(int num){
+        vector<int>block_id;
+        for(int i=0;i<BLOCK_BITMAP_SIZE;++i){
+            for(int j=31;j>=0;--j){
+                if((Block_bitmap[i]>>j)%2==0){
+                    Block_bitmap[i]=Block_bitmap[i]+(1<<j);
+                    Total_Free_Block_Num--;
+                    num--;
+                    block_id.push_back(31-j+i*32);
+                    if(num<=0) 
+                    return block_id;
+                }
+            }
+        }
     }
    
 };
@@ -64,8 +99,9 @@ public:
     int occupy_block_num;
     time_t create_time;
     char filename[MAX_FILE_NAME_LENGTH];
-
+    char fill_in;
     bool isDir;
+
     void info_show(){
         string isDir_s;
         if(isDir) isDir_s="True";
@@ -76,6 +112,18 @@ public:
         printf("%d年%d月%d日%d时%d分%d秒  星期%d\n",time_out.tm_year+1900,
         time_out.tm_mon+1,time_out.tm_mday,time_out.tm_hour,time_out.tm_min,
         time_out.tm_sec,time_out.tm_wday);
+    }
+
+    int get_offset(){
+        if(file_size<BLOCK_SIZE){
+            return direct_block[0]*BLOCK_SIZE+BLOCK_STARTADDR+file_size;
+        }
+        else{
+            int off=file_size%BLOCK_SIZE;
+            if(occupy_block_num<=10){
+
+            }
+        }
     }
 };
 
@@ -91,6 +139,7 @@ public:
         strcpy(filename,name.c_str());
         Inode_Id=id;
         isDir=isdir;
+        cout<<filename<<endl;
     }
     Dir_item(){
 
