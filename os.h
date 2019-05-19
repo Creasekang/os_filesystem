@@ -45,6 +45,7 @@ public:
 	int Inode_StartAddr;
 	int Block_StartAddr;
 
+   
 	unsigned int Block_bitmap[500];
 	unsigned int Inode_bitmap[96];//381*8/32
     void info_show(){
@@ -92,7 +93,7 @@ public:
  class Inode{     //128  实际为112   92
  public:
     int Inode_Id;
-    int direct_block[10];
+    int direct_block[DIRECT_BLOCK_NUM];
     int undirect_pointer_block;
     
     int file_size;
@@ -101,17 +102,46 @@ public:
     char filename[MAX_FILE_NAME_LENGTH];
     char fill_in;
     bool isDir;
-    
+    bool isRoot;
+    int para_Inode_id;
+    /*Inode(const Inode* other){
+        Inode_Id=other->Inode_Id;
+        for(int i=0;i<DIRECT_BLOCK_NUM;++i) direct_block[i]=other->direct_block[i];
+        undirect_pointer_block=other->undirect_pointer_block;
+        file_size=other->file_size;
+        occupy_block_num=other->occupy_block_num;
+        create_time=other->create_time;
+        strcpy(filename,other->filename);
+        fill_in=other->fill_in;
+        isDir=other->isDir;
+    }*/
+    Inode(const Inode& other){
+        Inode_Id=other.Inode_Id;
+        for(int i=0;i<DIRECT_BLOCK_NUM;++i) direct_block[i]=other.direct_block[i];
+        undirect_pointer_block=other.undirect_pointer_block;
+        file_size=other.file_size;
+        occupy_block_num=other.occupy_block_num;
+        create_time=other.create_time;
+        strcpy(filename,other.filename);
+        fill_in=other.fill_in;
+        isDir=other.isDir;
+        isRoot=other.isRoot;
+        para_Inode_id=other.para_Inode_id;
+    }
+    Inode(){
+
+    }
     void info_show(){
         string isDir_s;
         if(isDir) isDir_s="True";
         else isDir_s="False";
         cout<<setiosflags(ios::left)<<setw(25)<<filename<<setw(10)<<Inode_Id<<setw(10)<<file_size
-        <<setw(10)<<isDir_s<<setw(20)<<occupy_block_num<<setw(15);
+        <<setw(10)<<isDir_s<<setw(20)<<occupy_block_num;
         struct tm time_out=*localtime(&create_time);
-        printf("%d年%d月%d日%d时%d分%d秒  星期%d\n",time_out.tm_year+1900,
+        printf("%d年%d月%d日%d时%d分%d秒  星期%d",time_out.tm_year+1900,
         time_out.tm_mon+1,time_out.tm_mday,time_out.tm_hour,time_out.tm_min,
         time_out.tm_sec,time_out.tm_wday);
+        cout<<endl;
     }
 
     int get_offset(){
@@ -139,7 +169,6 @@ public:
         strcpy(filename,name.c_str());
         Inode_Id=id;
         isDir=isdir;
-        cout<<filename<<endl;
     }
     Dir_item(){
 
