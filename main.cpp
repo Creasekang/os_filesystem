@@ -23,6 +23,11 @@ int find_path(FILE* f,Inode* cur_Node,string path,Inode* last,string&);
 vector<string> split(string str,string pattern); //分割字符串，用于寻找路径
 int changeDir(FILE*f,Inode* node);
 string getPath(FILE*f,Inode* node);
+
+bool deleteFile(SuperBlock&s_block, Inode&curr_i, FILE*f, string path_str);
+bool deleteDir(SuperBlock&s_block, Inode&curr_i, FILE*f, string path_str,bool tag);
+bool copyfile(SuperBlock&s_block, Inode&curr_i, FILE*f, string path_str1, string path_str2);
+
 SuperBlock superB;
 SuperBlock s_block;
 
@@ -74,6 +79,38 @@ int main() {
            int result= changeDir(file,&cur_Dir);
            cur_path=getPath(file,&cur_Dir);
         }
+	else if(command=="df")
+	{
+		string filename;
+		cin >> filename;
+		bool ans = deleteFile(s_block,cur_Dir,file,filename);
+		if (ans == false)
+			cout << "there is no file in this directory." << endl;
+		else
+			cout << "delete file succeed!" << endl;
+	}
+	else if (command=="dd") {
+		string filename_path;
+		cin >> filename_path;
+		bool ans = deleteDir(s_block, cur_Dir, file, filename_path,true);
+		if (ans == false)
+			cout << "there is no directory in this directory." << endl;
+		else
+			cout << "delete file succeed!" << endl;
+
+	}
+	else if (command == "cp") {
+		string filename_path1, filename_path2;
+		cin >> filename_path1>> filename_path2;
+		bool ans = copyfile(s_block, cur_Dir, file, filename_path1, filename_path2);
+		if (ans == false)
+			cout << "fail to copy file." << endl;
+		else
+			cout << "copy file succeed!" << endl;
+
+	}
+	 
+	    
         fseek(file, cur_Dir.Inode_Id*INODE_SIZE+INODE_STARTADDR, SEEK_SET);
         fread(&cur_Dir, sizeof(Inode), 1, file);
         fflush(file);
@@ -603,3 +640,481 @@ string getPath(FILE*f,Inode* node){
     return ans;
 }
 
+
+bool deleteFile(SuperBlock&s_block, Inode&curr_i, FILE*f, string path_str)
+{
+	string filename;
+	Inode path;
+	int result = find_path(f, &curr_i, path_str, &path, filename);  //find the path
+	if (result != 1) {
+		cout << "The path does not exist." << endl;
+		return false;
+	}
+	Inode object;
+	int flag=find_item(f, &path,  filename,  &object);
+	if (object.filename == filename&&flag==1)
+		cout << "has found the file to be deleted." << endl;
+	else {
+		return false;
+	}
+	//将 inode bitmap对应位 置0
+	int index = object.Inode_Id / 32;
+	int offset = object.Inode_Id % 32;
+	s_block.Inode_bitmap[index] &= ~(1 << (31 - offset));
+	s_block.Total_Free_Inode_Num++;
+	//将 bolck bitmap对应位 置0
+	int extra_num=0,direct_num=0;
+	if (object.undirect_pointer_block == -1) {  //只有直接块的地址，无间接块
+		extra_num = 0;
+		direct_num = object.occupy_block_num;
+	}
+	else {  
+		extra_num = object.occupy_block_num - 10;
+		direct_num = 10;
+	}
+	//直接块处理
+	for (int i = 0; i < direct_num ; i++)  
+	{
+		int addr=object.direct_block[i];
+		int num = (addr - BLOCK_STARTADDR) / BLOCK_SIZE;
+		index = num / 32;
+		offset = num % 32;
+		s_block.Block_bitmap[index] &= ~(1 << (31 - offset));
+		s_block.Total_Free_Block_Num++;
+	}
+	if(extra_num>0) {  //间接块里的地址处理    还未测试		
+		for (int i = 0; i < extra_num; i++) 
+		{									        //间接块里地址为int，32位
+			int addr;
+			fseek(f,object.undirect_pointer_block+i*INT_SIZE, SEEK_SET);
+			fread(&addr, sizeof(int), 1, f);
+			int num = (addr - BLOCK_STARTADDR) / BLOCK_SIZE;
+			index = num / 32;
+			offset = num % 32;
+			s_block.Block_bitmap[index] &= ~(1 << (31 - offset));
+			s_block.Total_Free_Block_Num++;
+		}
+	}
+
+	//删除当前目录inode里的对要删去的file的存储
+	int item_num = path.file_size / DIRITEM_SIZE;
+	if (path.undirect_pointer_block == -1) {   //只有直接块
+		int index1 = -1, offset1 = -1;
+		for (int i = 0; i<path.occupy_block_num; ++i) {
+			int block_st = path.direct_block[i];
+			int num = 0;
+			if (i == node->occupy_block_num - 1) num = item_num % 32;
+			else num = 32;
+			//找出该file的存储位置
+			for (int j = 0; j<num; ++j) {
+				Dir_item item;
+				Inode attr;
+				fseek(f, block_st + j * DIRITEM_SIZE, SEEK_SET);
+				fread(&item, sizeof(Dir_item), 1, f);
+				if (strcmp(filename.c_str(), item.filename) == 0) {
+					index1 = i;
+					offset1 = j;
+			//		cout << index1 <<"  "<< offset1 << endl;
+					break;
+				}
+			}
+			/*
+			if (index != -1)
+				break;
+				*/
+		}
+		if(index1*32+offset1+1==item_num)
+		{
+			//是，则直接减小item数目
+			path.file_size -= DIRITEM_SIZE;
+		}
+		else {						
+			//找到最后一项item
+			fseek(f, path.direct_block[path.occupy_block_num - 1] + ((item_num-1) % 32) * DIRITEM_SIZE, SEEK_SET);
+		//	cout << object.direct_block[path.occupy_block_num - 1] + ((item_num - 1) % 32) * DIRITEM_SIZE  << endl;
+			Dir_item last_item;
+			
+			fread(&last_item, sizeof(Dir_item), 1, f);
+			//fflush(f);
+			last_item.info_show();
+			fseek(f, path.direct_block[index1] + offset1 * DIRITEM_SIZE, SEEK_SET);
+			fwrite(&last_item, sizeof(Dir_item), 1, f);  //将最后一项写入填补
+			fflush(f);
+			path.file_size -= DIRITEM_SIZE;
+		}
+	}
+	//最终，写入super block和Current inode
+	fseek(f,0,SEEK_SET);
+	fwrite(&s_block,sizeof(SuperBlock),1,f);
+	fseek(f, path.Inode_Id*INODE_SIZE+INODE_STARTADDR, SEEK_SET);
+	fwrite(&path, sizeof(Inode), 1, f);
+	return true;
+
+}
+
+
+
+bool deleteDir(SuperBlock&s_block, Inode&curr_i, FILE*f, string path_str,bool tag)
+{
+	Inode path;   //上一级目录
+	string filename;
+	int result = find_path(f, &curr_i, path_str, &path, filename);  //find the path
+	if (result != 1) {
+		cout << "The directory does not exist." << endl;
+		return false;
+	}
+
+	Inode object;  //目标目录inode
+	int flag = find_item(f, &path, filename, &object);
+	if (object.filename == filename && flag == 1&&tag)
+		cout << "has found the directory to be deleted." << endl;
+	else {
+		return false;
+	}
+	if (!object.isDir)
+	{
+		cout << "this is not a directory!" << endl;
+		return false;
+	}
+	//将 inode bitmap对应位 置0
+	int index = object.Inode_Id / 32;
+	int offset = object.Inode_Id % 32;
+	s_block.Inode_bitmap[index] &= ~(1 << (31 - offset));
+	s_block.Total_Free_Inode_Num++;
+	//将 bolck bitmap对应位 置0
+	int extra_num = 0, direct_num = 0;
+	if (object.undirect_pointer_block == -1) {  //只有直接块的地址，无间接块
+		extra_num = 0;
+		direct_num = object.occupy_block_num;
+	}
+	else {
+		extra_num = object.occupy_block_num - 10;
+		direct_num = 10;
+	}
+	//直接块block处理
+	for (int i = 0; i < direct_num; i++)
+	{
+		int addr = object.direct_block[i];
+		int num = (addr - BLOCK_STARTADDR) / BLOCK_SIZE;
+		index = num / 32;
+		offset = num % 32;
+		s_block.Block_bitmap[index] &= ~(1 << (31 - offset));
+		s_block.Total_Free_Block_Num++;
+	}
+	if (extra_num>0) {  //间接块里的地址处理    还未测试		
+		for (int i = 0; i < extra_num; i++)
+		{									        //间接块里地址为int，32位
+			int addr;
+			fseek(f, object.undirect_pointer_block + i * INT_SIZE, SEEK_SET);
+			fread(&addr, sizeof(int), 1, f);
+			int num = (addr - BLOCK_STARTADDR) / BLOCK_SIZE;
+			index = num / 32;
+			offset = num % 32;
+			s_block.Block_bitmap[index] &= ~(1 << (31 - offset));
+			s_block.Total_Free_Block_Num++;
+		}
+	}
+
+	if (tag)
+	{
+		//删除path目录inode里的对要删去的dir的存储
+		int item_num = path.file_size / DIRITEM_SIZE;
+		if (path.undirect_pointer_block == -1) {   //只有直接块
+			int index1 = -1, offset1 = -1;
+			for (int i = 0; i < path.occupy_block_num; ++i) {
+				int block_st = path.direct_block[i];
+				int num = 0;
+				if (i == path.occupy_block_num - 1) num = item_num % 32;
+				else num = 32;
+				//找出该file的存储位置
+				for (int j = 0; j < num; ++j) {
+					Dir_item item;
+					Inode attr;
+					fseek(f, block_st + j * DIRITEM_SIZE, SEEK_SET);
+					fread(&item, sizeof(Dir_item), 1, f);
+					if (strcmp(filename.c_str(), item.filename) == 0) {
+						index1 = i;
+						offset1 = j;
+						//		cout << index1 <<"  "<< offset1 << endl;
+						break;
+					}
+				}
+				/*
+				if (index != -1)
+				break;
+				*/
+			}
+			if (index1 * 32 + offset1+1 == item_num)
+			{
+				//是，则直接减小item数目
+				path.file_size -= DIRITEM_SIZE;
+			}
+			else {
+				//找到最后一项item
+				fseek(f, path.direct_block[path.occupy_block_num - 1] + ((item_num - 1) % 32) * DIRITEM_SIZE, SEEK_SET);
+				//	cout << object.direct_block[path.occupy_block_num - 1] + ((item_num - 1) % 32) * DIRITEM_SIZE  << endl;
+				Dir_item last_item;
+				fread(&last_item, sizeof(Dir_item), 1, f);
+				//fflush(f);
+
+			//	last_item.info_show();
+				fseek(f, path.direct_block[index1] + offset1 * DIRITEM_SIZE, SEEK_SET);
+				fwrite(&last_item, sizeof(Dir_item), 1, f);  //将最后一项写入填补
+				fflush(f);
+				path.file_size -= DIRITEM_SIZE;
+			}
+
+		}
+
+		fseek(f, path.Inode_Id*INODE_SIZE + INODE_STARTADDR, SEEK_SET);
+		fwrite(&path, sizeof(Inode), 1, f);
+	}
+	//最终，写入super block和Current inode
+	fseek(f, 0, SEEK_SET);
+	fwrite(&s_block, sizeof(SuperBlock), 1, f);
+	
+
+
+	if (object.file_size == 2 * DIRITEM_SIZE) //空文件的目录，
+	{
+		return true;
+	}
+
+	//删除该目录下直接块的文件file
+	int item_num = object.file_size / DIRITEM_SIZE;
+	for (int i = 0; i < direct_num; i++)
+	{
+		int block_st = object.direct_block[i];
+		int num = 0;
+		if (i == object.occupy_block_num - 1) num = item_num % 32;
+		else num = 32;
+		for (int j = 0; j<num; ++j) {
+			Dir_item item;
+			Inode attr;
+			fseek(f, block_st + j * DIRITEM_SIZE, SEEK_SET);
+			fread(&item, sizeof(Dir_item), 1, f);
+			int inode_id = item.Inode_Id;
+			fseek(f, inode_id*INODE_SIZE + INODE_STARTADDR, SEEK_SET);
+			Inode temp;
+			fread(&temp, sizeof(Inode), 1, f);
+
+			if (!item.isDir) //是file
+			{
+				//将 inode bitmap对应位 置0
+				int index = temp.Inode_Id / 32;
+				int offset = temp.Inode_Id % 32;
+				s_block.Inode_bitmap[index] &= ~(1 << (31 - offset));
+				s_block.Total_Free_Inode_Num++;
+				//将 bolck bitmap对应位 置0
+				int extra_num = 0, direct_num = 0;
+				if (temp.undirect_pointer_block == -1) {  //只有直接块的地址，无间接块
+					extra_num = 0;
+					direct_num = temp.occupy_block_num;
+				}
+				else {
+					extra_num = temp.occupy_block_num - 10;
+					direct_num = 10;
+				}
+				//直接块block处理
+				for (int i = 0; i < direct_num; i++)
+				{
+					int addr = temp.direct_block[i];
+					int num = (addr - BLOCK_STARTADDR) / BLOCK_SIZE;
+					index = num / 32;
+					offset = num % 32;
+					s_block.Block_bitmap[index] &= ~(1 << (31 - offset));
+					s_block.Total_Free_Block_Num++;
+				}
+				if (extra_num>0) {  //间接块里的地址处理    还未测试		
+					for (int i = 0; i < extra_num; i++)
+					{									        //间接块里地址为int，32位
+						int addr;
+						fseek(f, temp.undirect_pointer_block + i * INT_SIZE, SEEK_SET);
+						fread(&addr, sizeof(int), 1, f);
+						int num = (addr - BLOCK_STARTADDR) / BLOCK_SIZE;
+						index = num / 32;
+						offset = num % 32;
+						s_block.Block_bitmap[index] &= ~(1 << (31 - offset));
+						s_block.Total_Free_Block_Num++;
+					}
+				}
+				
+
+			}
+
+			else {             // 子目录的处理
+
+				deleteDir(s_block,object,f,temp.filename,false);
+
+			}
+		}
+
+	}
+
+	//最终，写入super block和Current inode
+	fseek(f, 0, SEEK_SET);
+	fwrite(&s_block, sizeof(SuperBlock), 1, f);
+	if (tag) {
+		fseek(f, path.Inode_Id*INODE_SIZE + INODE_STARTADDR, SEEK_SET);
+		fwrite(&path, sizeof(Inode), 1, f);
+	}
+	return true;
+
+}
+
+
+
+bool copyfile(SuperBlock&s_block, Inode&curr_i, FILE*f, string path_str1, string path_str2)
+{
+	Inode path1,path2;   //上一级目录
+	string filename1,filename2;
+	int result1 = find_path(f, &curr_i, path_str1, &path1, filename1);  //find the path
+	if (result1 != 1) {
+		cout << "The file 1 does not exist." << endl;
+		return false;
+	}
+	int result2= find_path(f, &curr_i, path_str2, &path2, filename2);  //find the path
+	if (result2 != 1) {
+		cout << "The path of file 2 does not exist." << endl;
+		return false;
+	}
+
+	Inode file1;  //原inode
+	int flag = find_item(f, &path1, filename1, &file1);
+	if (file1.filename == filename1 && flag == 1)
+		cout << "has found the file 1." << endl;
+	else {	
+		cout << "don't find the file 1:" <<filename1<< endl;
+		return false;
+	}
+	if (file1.isDir)
+	{
+		cout << "file 1: "<<file1.filename<<" is directory, not file, so can't copy." << endl;
+		return false;
+	}
+	cout << file1.filename << "information:" << endl;
+	file1.info_show();
+
+
+
+	int b_num;
+	vector<int>block_id;
+	int inode_id;
+
+	if (s_block.Total_Free_Inode_Num <= 0) {
+		cout << "There is not enough free Inode." << endl;
+		return false;
+	}
+	// create the file node
+	else {
+
+		b_num = file1.occupy_block_num;
+
+		inode_id = s_block.get_Inode();
+		block_id = s_block.get_block(b_num);
+		
+
+		Inode node;
+		node.create_time = time(NULL);
+		node.file_size = file1.file_size;
+		strcpy(node.filename, filename2.c_str());
+		node.fill_in = file1.fill_in;
+
+		node.Inode_Id = inode_id;
+
+		node.isDir = file1.isDir;
+		node.isRoot = file1.isRoot;
+
+		node.para_Inode_id = path2.Inode_Id;
+		node.occupy_block_num = file1.occupy_block_num;
+
+		char buffer[BLOCK_SIZE];
+		for (int i = 0; i<BLOCK_SIZE; ++i)
+			buffer[i] = node.fill_in;
+
+		vector<int>block_addr;
+
+		if (b_num <= DIRECT_BLOCK_NUM) {
+			for (int i = 0; i<b_num; ++i) {
+				node.direct_block[i] = block_id[i] * BLOCK_SIZE + BLOCK_STARTADDR;
+			}
+			node.undirect_pointer_block = -1;
+			
+		}
+		else {
+			for (int i = 0; i<DIRECT_BLOCK_NUM; ++i) {
+				int c_size = min(BLOCK_SIZE, node.file_size - i * BLOCK_SIZE);
+				node.direct_block[i] = block_id[i] * BLOCK_SIZE + BLOCK_STARTADDR;
+				fseek(f, node.direct_block[i], SEEK_SET);
+				fwrite(buffer, sizeof(char), c_size, f);
+				fflush(f);
+			}
+			int t_block[UNDIRECT_POINTER_BLOCK];
+			node.undirect_pointer_block = s_block.get_block(1)[0] * BLOCK_SIZE + BLOCK_STARTADDR;
+			for (int i = DIRECT_BLOCK_NUM; i<b_num; ++i) {
+				t_block[i - DIRECT_BLOCK_NUM] = block_id[i] * BLOCK_SIZE + BLOCK_STARTADDR;
+			}
+			fseek(f, node.undirect_pointer_block, SEEK_SET);
+			fwrite(&t_block, sizeof(int), b_num - DIRECT_BLOCK_NUM, f);
+			fflush(f);
+		}
+		for (int i = 0; i<block_id.size(); ++i) {
+			int block_addr = block_id[i] * BLOCK_SIZE + BLOCK_STARTADDR;
+			int c_size = min(BLOCK_SIZE, node.file_size - i * BLOCK_SIZE);
+			fseek(f, block_addr, SEEK_SET);
+			fwrite(buffer, sizeof(char), c_size, f);
+			fflush(f);
+		}
+		fseek(f, INODE_STARTADDR + inode_id * INODE_SIZE, SEEK_SET);
+		fwrite(&node, sizeof(node), 1, f);
+		fflush(f);
+
+		//add item into cur_Dir
+		Dir_item newFile(filename2, node.Inode_Id, false);
+		int offset = path2.file_size%BLOCK_SIZE;  //是否占满了最后一个block
+		if (offset>0) {   //没占满了最后一个block
+			int b_id;
+			if (path2.undirect_pointer_block == -1) { //最后一个block在直接块处
+				b_id = path2.direct_block[path2.occupy_block_num - 1];
+				fseek(f, b_id + offset, SEEK_SET);
+				fwrite(&newFile, sizeof(Dir_item), 1, f);
+			}
+			else {
+				int buffer[UNDIRECT_POINTER_BLOCK];
+				fseek(f, path2.undirect_pointer_block, SEEK_SET);
+				fread(&buffer, sizeof(int), path2.occupy_block_num - DIRECT_BLOCK_NUM, f);
+				fflush(f);
+				b_id = buffer[path2.occupy_block_num - DIRECT_BLOCK_NUM - 1];
+			}
+			fseek(f, b_id + offset, SEEK_SET);
+			fwrite(&newFile, sizeof(Dir_item), 1, f);
+			fflush(f);
+		}
+		else {    //占满了最后一个block
+			int new_addr = BLOCK_STARTADDR + s_block.get_block(1)[0] * BLOCK_SIZE;
+			fseek(f, new_addr, SEEK_SET);
+			fwrite(&newFile, sizeof(Dir_item), 1, f);
+			fflush(f);
+			if (path2.occupy_block_num<DIRECT_BLOCK_NUM) {    //直接块仍有空余
+				path2.direct_block[path2.occupy_block_num] = new_addr;
+				path2.occupy_block_num += 1;
+			}
+			else {
+				if (path2.undirect_pointer_block == -1) {
+					path2.undirect_pointer_block = s_block.get_block(1)[0] * BLOCK_SIZE + BLOCK_STARTADDR;
+				}
+				int offset = sizeof(int)*(path2.occupy_block_num - DIRECT_BLOCK_NUM);
+				fseek(f, path2.undirect_pointer_block + offset, SEEK_SET);
+				fwrite(&new_addr, sizeof(int), 1, f);
+				fflush(f);
+				path2.occupy_block_num += 1;
+			}
+		}
+		path2.file_size += DIRITEM_SIZE;
+		fseek(f, INODE_STARTADDR + path2.Inode_Id*INODE_SIZE, SEEK_SET);
+		fwrite(&path2, sizeof(Inode), 1, f);
+		fflush(f);
+	}
+	return true;
+
+}
