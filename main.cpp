@@ -382,10 +382,8 @@ void initial(){
 	superB.Dir_Item_Size = DIRITEM_SIZE;
 	superB.Block_Size = BLOCK_SIZE;
 			//初始化bitmap
-	//cout << sizeof(superB.Block_bitmap) << endl << sizeof(superB.Inode_bitmap); //2000, 384
 	for(int i=0;i<INODE_BITMAP_SIZE;++i) superB.Inode_bitmap[i]=0;
     for(int i=0;i<BLOCK_BITMAP_SIZE;++i) superB.Block_bitmap[i]=0; 
-	//cout << sizeof(inode_list) << endl;  //92*3048=280416
 
 	//初始化inode表
 	for (int i = 0; i < MAX_INODE_NUM; i++)
@@ -714,7 +712,6 @@ bool deleteFile(SuperBlock&s_block, Inode&curr_i, FILE*f, string path_str)
 				if (strcmp(filename.c_str(), item.filename) == 0) {
 					index1 = i;
 					offset1 = j;
-			//		cout << index1 <<"  "<< offset1 << endl;
 					break;
 				}
 			}
@@ -731,7 +728,6 @@ bool deleteFile(SuperBlock&s_block, Inode&curr_i, FILE*f, string path_str)
 		else {						
 			//找到最后一项item
 			fseek(f, path.direct_block[path.occupy_block_num - 1] + ((item_num-1) % 32) * DIRITEM_SIZE, SEEK_SET);
-		//	cout << object.direct_block[path.occupy_block_num - 1] + ((item_num - 1) % 32) * DIRITEM_SIZE  << endl;
 			Dir_item last_item;
 			
 			fread(&last_item, sizeof(Dir_item), 1, f);
@@ -835,7 +831,6 @@ bool deleteDir(SuperBlock&s_block, Inode&curr_i, FILE*f, string path_str,bool ta
 					if (strcmp(filename.c_str(), item.filename) == 0) {
 						index1 = i;
 						offset1 = j;
-						//		cout << index1 <<"  "<< offset1 << endl;
 						break;
 					}
 				}
@@ -852,7 +847,6 @@ bool deleteDir(SuperBlock&s_block, Inode&curr_i, FILE*f, string path_str,bool ta
 			else {
 				//找到最后一项item
 				fseek(f, path.direct_block[path.occupy_block_num - 1] + ((item_num - 1) % 32) * DIRITEM_SIZE, SEEK_SET);
-				//	cout << object.direct_block[path.occupy_block_num - 1] + ((item_num - 1) % 32) * DIRITEM_SIZE  << endl;
 				Dir_item last_item;
 				fread(&last_item, sizeof(Dir_item), 1, f);
 				//fflush(f);

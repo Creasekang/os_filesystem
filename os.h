@@ -64,7 +64,6 @@ public:
     int get_Inode(){
         for(int i=0;i<INODE_BITMAP_SIZE;++i){
             for(int j=31;j>=0;--j){
-                //cout<<"Inode : "<<Inode_bitmap[i]<<"  j :"<<j<<endl;
                 if((Inode_bitmap[i]>>j)%2==0){
                     Inode_bitmap[i]=Inode_bitmap[i]+(1<<(j));
                     Total_Free_Inode_Num--;
@@ -106,17 +105,6 @@ public:
     bool isDir;
     bool isRoot;
     int para_Inode_id;
-    /*Inode(const Inode* other){
-        Inode_Id=other->Inode_Id;
-        for(int i=0;i<DIRECT_BLOCK_NUM;++i) direct_block[i]=other->direct_block[i];
-        undirect_pointer_block=other->undirect_pointer_block;
-        file_size=other->file_size;
-        occupy_block_num=other->occupy_block_num;
-        create_time=other->create_time;
-        strcpy(filename,other->filename);
-        fill_in=other->fill_in;
-        isDir=other->isDir;
-    }*/
     Inode(const Inode& other){
         Inode_Id=other.Inode_Id;
         for(int i=0;i<DIRECT_BLOCK_NUM;++i) direct_block[i]=other.direct_block[i];
