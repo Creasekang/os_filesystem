@@ -28,12 +28,6 @@ SuperBlock s_block;
 
 int main() {
      
-     /*string path;
-     while(cin>>path){
-         for(auto i:split(path, "/")){
-             cout<<i<<endl;
-         }
-     }*/
 
 	cout << sizeof(SuperBlock) << endl;
 	cout << sizeof(Inode) << endl;
@@ -56,8 +50,9 @@ int main() {
 
     string command;
     string cur_path="/root";
+    
+    cout<<cur_path<<">";
     while(cin>>command){
-        cout<<cur_path<<">";
         cout<<endl;
         if(command=="show"){
             s_block.info_show();
@@ -82,6 +77,7 @@ int main() {
         fseek(file, cur_Dir.Inode_Id*INODE_SIZE+INODE_STARTADDR, SEEK_SET);
         fread(&cur_Dir, sizeof(Inode), 1, file);
         fflush(file);
+        cout<<cur_path<<">";
     }
     
     std::fclose(file);
@@ -121,7 +117,7 @@ int createFile(SuperBlock& s_block,Inode& cur_Dir,FILE* file){
     // create the file node
     else{
         b_num=fileSize/BLOCK_SIZE;
-        if(fileSize)   b_num=b_num+1;
+        if(fileSize%BLOCK_SIZE)   b_num=b_num+1;
         inode_id=s_block.get_Inode(); 
         block_id=s_block.get_block(b_num);
         char fill_in=rand()%26+'A';
@@ -135,48 +131,87 @@ int createFile(SuperBlock& s_block,Inode& cur_Dir,FILE* file){
         node.isRoot=false;
         node.para_Inode_id=path.Inode_Id;
         node.occupy_block_num=b_num;
+
+        char buffer[BLOCK_SIZE];
+        for(int i=0;i<BLOCK_SIZE;++i) 
+            buffer[i]=fill_in;
+        vector<int>block_addr;
         if(b_num<=DIRECT_BLOCK_NUM){
             for(int i=0;i<b_num;++i){
                 node.direct_block[i]=block_id[i]*BLOCK_SIZE+BLOCK_STARTADDR;
             }
             node.undirect_pointer_block=-1;
-            fseek(file,INODE_STARTADDR+inode_id*INODE_SIZE,SEEK_SET);
-            fwrite(&node,sizeof(node),1,file);
-            char buffer[BLOCK_SIZE];
-            for(int i=0;i<BLOCK_SIZE;++i) 
-                buffer[i]=fill_in;
-            for(int i=0;i<node.occupy_block_num;++i){
-                int c_size=min(BLOCK_SIZE,node.file_size-i*BLOCK_SIZE);
-                fseek(file,node.direct_block[i],SEEK_SET);
-                fwrite(buffer,sizeof(char),c_size,file);
-            }
             cout<<"We fill it by a random string : "<<fill_in<<endl;
         }
-        
+        else{
+            for(int i=0;i<DIRECT_BLOCK_NUM;++i){
+                int c_size=min(BLOCK_SIZE,node.file_size-i*BLOCK_SIZE);
+                node.direct_block[i]=block_id[i]*BLOCK_SIZE+BLOCK_STARTADDR;
+                fseek(file,node.direct_block[i],SEEK_SET);
+                fwrite(buffer,sizeof(char),c_size,file);
+                fflush(file);
+            }
+            int t_block[UNDIRECT_POINTER_BLOCK];
+            node.undirect_pointer_block=s_block.get_block(1)[0]*BLOCK_SIZE+BLOCK_STARTADDR;
+            for(int i=DIRECT_BLOCK_NUM;i<b_num;++i){
+                t_block[i-DIRECT_BLOCK_NUM]=block_id[i]*BLOCK_SIZE+BLOCK_STARTADDR;
+            }
+            fseek(file,node.undirect_pointer_block,SEEK_SET);
+            fwrite(&t_block,sizeof(int),b_num-DIRECT_BLOCK_NUM,file);
+            fflush(file);
+        }
+        for(int i=0;i<block_id.size();++i){
+            int block_addr=block_id[i]*BLOCK_SIZE+BLOCK_STARTADDR;
+            int c_size=min(BLOCK_SIZE,node.file_size-i*BLOCK_SIZE);
+            fseek(file,block_addr,SEEK_SET);
+            fwrite(buffer,sizeof(char),c_size,file);
+            fflush(file);
+        }
+        fseek(file,INODE_STARTADDR+inode_id*INODE_SIZE,SEEK_SET);
+        fwrite(&node,sizeof(node),1,file);
+        fflush(file);
         //add item into cur_Dir
         Dir_item newFile(fileName,node.Inode_Id,false);
         int offset=path.file_size%BLOCK_SIZE;  //是否占满了最后一个block
         if(offset>0){   //没占满了最后一个block
+            int b_id;
             if(path.undirect_pointer_block==-1){ //最后一个block在直接块处
-                int b_id=path.direct_block[path.occupy_block_num-1];
+                b_id=path.direct_block[path.occupy_block_num-1];
                 fseek(file,b_id+offset,SEEK_SET);
                 fwrite(&newFile,sizeof(Dir_item),1,file);
-                path.file_size+=DIRITEM_SIZE;
             }
             else{
-
+                int buffer[UNDIRECT_POINTER_BLOCK];
+                fseek(file,path.undirect_pointer_block,SEEK_SET);
+                fread(&buffer,sizeof(int),path.occupy_block_num-DIRECT_BLOCK_NUM,file);
+                fflush(file);
+                b_id=buffer[path.occupy_block_num-DIRECT_BLOCK_NUM-1];
             }
+            fseek(file,b_id+offset,SEEK_SET);
+            fwrite(&newFile,sizeof(Dir_item),1,file);
+            fflush(file);
         }
         else{    //占满了最后一个block
-            if(path.occupy_block_num<10){    //直接块仍有空余
-                int new_addr=BLOCK_STARTADDR+s_block.get_block(1)[0]*BLOCK_SIZE;
+            int new_addr=BLOCK_STARTADDR+s_block.get_block(1)[0]*BLOCK_SIZE;
+            fseek(file,new_addr,SEEK_SET);
+            fwrite(&newFile,sizeof(Dir_item),1,file);
+            fflush(file);
+            if(path.occupy_block_num<DIRECT_BLOCK_NUM){    //直接块仍有空余
                 path.direct_block[path.occupy_block_num]=new_addr;
                 path.occupy_block_num+=1;
-                fseek(file,new_addr,SEEK_SET);
-                fwrite(&newFile,sizeof(Dir_item),1,file);
-                path.file_size+=DIRITEM_SIZE;
+            }
+            else{
+                if(path.undirect_pointer_block==-1){
+                    path.undirect_pointer_block=s_block.get_block(1)[0]*BLOCK_SIZE+BLOCK_STARTADDR;
+                }
+                int offset=sizeof(int)*(path.occupy_block_num-DIRECT_BLOCK_NUM);
+                fseek(file,path.undirect_pointer_block+offset,SEEK_SET);
+                fwrite(&new_addr,sizeof(int),1,file);
+                fflush(file);
+                path.occupy_block_num+=1;
             }
         }
+        path.file_size+=DIRITEM_SIZE;
         fseek(file,INODE_STARTADDR+path.Inode_Id*INODE_SIZE,SEEK_SET);
         fwrite(&path,sizeof(Inode),1,file);
         fflush(file);
@@ -234,30 +269,47 @@ void createDir(SuperBlock& s_block,Inode& cur_Dir ,FILE* file){
         Dir_item newFile(fileName,node.Inode_Id,false);
         int offset=path.file_size%BLOCK_SIZE;  //是否占满了最后一个block
         if(offset>0){   //没占满了最后一个block
+            int b_id;
             if(path.undirect_pointer_block==-1){ //最后一个block在直接块处
-                int b_id=path.direct_block[path.occupy_block_num-1];
+                b_id=path.direct_block[path.occupy_block_num-1];
                 fseek(file,b_id+offset,SEEK_SET);
                 fwrite(&newFile,sizeof(Dir_item),1,file);
-                path.file_size+=DIRITEM_SIZE;
             }
             else{
-
+                int buffer[UNDIRECT_POINTER_BLOCK];
+                fseek(file,path.undirect_pointer_block,SEEK_SET);
+                fread(&buffer,sizeof(int),path.occupy_block_num-DIRECT_BLOCK_NUM,file);
+                fflush(file);
+                b_id=buffer[path.occupy_block_num-DIRECT_BLOCK_NUM-1];
             }
+            fseek(file,b_id+offset,SEEK_SET);
+            fwrite(&newFile,sizeof(Dir_item),1,file);
+            fflush(file);
         }
         else{    //占满了最后一个block
-            if(path.occupy_block_num<10){    //直接块仍有空余
-                int new_addr=BLOCK_STARTADDR+s_block.get_block(1)[0]*BLOCK_SIZE;
+            int new_addr=BLOCK_STARTADDR+s_block.get_block(1)[0]*BLOCK_SIZE;
+            fseek(file,new_addr,SEEK_SET);
+            fwrite(&newFile,sizeof(Dir_item),1,file);
+            fflush(file);
+            if(path.occupy_block_num<DIRECT_BLOCK_NUM){    //直接块仍有空余
                 path.direct_block[path.occupy_block_num]=new_addr;
                 path.occupy_block_num+=1;
-                fseek(file,new_addr,SEEK_SET);
-                fwrite(&newFile,sizeof(Dir_item),1,file);
-                path.file_size+=DIRITEM_SIZE;
+            }
+            else{
+                if(path.undirect_pointer_block==-1){
+                    path.undirect_pointer_block=s_block.get_block(1)[0]*BLOCK_SIZE+BLOCK_STARTADDR;
+                }
+                int offse=sizeof(int)*(path.occupy_block_num-DIRECT_BLOCK_NUM);
+                fseek(file,path.undirect_pointer_block+offse,SEEK_SET);
+                fwrite(&new_addr,sizeof(int),1,file);
+                fflush(file);
+                path.occupy_block_num+=1;
             }
         }
+        path.file_size+=DIRITEM_SIZE;
         fseek(file,INODE_STARTADDR+path.Inode_Id*INODE_SIZE,SEEK_SET);
         fwrite(&path,sizeof(Inode),1,file);
         fflush(file);
-        path.info_show();
     }
 }
 
@@ -344,28 +396,45 @@ void dir(FILE* f,Inode* node){   //半成品，仅适用于未采用间接块的
     int item_num=node->file_size/DIRITEM_SIZE;
     cout<<setiosflags(ios::left)<<setw(25)<<"Filename"<<setw(10)<<"Inode_Id"<<setw(10)<<"File_size"
     <<setw(10)<<"isDir_s"<<setw(20)<<"Occupy_block_num"<<setw(15)<<"Create_time"<<endl;
+    vector<int>block_addr;
     if(node->undirect_pointer_block==-1){
-        for(int i=0;i<node->occupy_block_num;++i){
-            int block_st=node->direct_block[i];
-            int num=0;
-            if(i==node->occupy_block_num-1) num=item_num%32;
-            else num=32;
-            for(int j=0;j<num;++j){
-                Dir_item item;
-                Inode attr;
-                fseek(f, block_st+j*DIRITEM_SIZE, SEEK_SET);
-                fread(&item, sizeof(Dir_item), 1, f);
-                fflush(f);
-                if( strcmp(item.filename,".")==0 ||  strcmp(item.filename,"..")==0){
-                    continue;
-                }
-                fseek(f,item.Inode_Id*INODE_SIZE+INODE_STARTADDR,SEEK_SET);
-                fread(&attr, sizeof(Inode), 1, f);
-                fflush(f);
-                attr.info_show();
-            }
+        for(int i=0;i<node->occupy_block_num;++i)
+        block_addr.push_back(node->direct_block[i]);
+    }
+    else{
+        for(int i=0;i<DIRECT_BLOCK_NUM;++i)
+        block_addr.push_back(node->direct_block[i]);
+        int buffer[UNDIRECT_POINTER_BLOCK];
+        fseek(f,node->undirect_pointer_block,SEEK_SET);
+        fread(&buffer,sizeof(int),node->occupy_block_num-DIRECT_BLOCK_NUM,f);
+        fflush(f);
+        for(int i=0;i<node->occupy_block_num-DIRECT_BLOCK_NUM;++i){
+            block_addr.push_back(buffer[i]);
         }
     }
+    for(int i=0;i<node->occupy_block_num;++i){
+        int block_st=block_addr[i];
+        int num=0;
+        if(i==node->occupy_block_num-1) num=item_num%32;
+        else num=32;
+        for(int j=0;j<num;++j){
+            Dir_item item;
+            Inode attr;
+            fseek(f, block_st+j*DIRITEM_SIZE, SEEK_SET);
+            fread(&item, sizeof(Dir_item), 1, f);
+            fflush(f);
+            if( strcmp(item.filename,".")==0 ||  strcmp(item.filename,"..")==0){
+                continue;
+            }
+            fseek(f,item.Inode_Id*INODE_SIZE+INODE_STARTADDR,SEEK_SET);
+            fread(&attr, sizeof(Inode), 1, f);
+            fflush(f);
+            attr.info_show();
+        }
+    }
+    
+    
+    cout<<endl<<"Print end"<<endl;
 }
 
 void cat(FILE*f,Inode* node){
@@ -378,17 +447,34 @@ void cat(FILE*f,Inode* node){
     if(result==1){
         int result2=find_item(f,&path,filename,&openFile);
         if(result2==1){
+            vector<int>block_addr;
             if(openFile.undirect_pointer_block==-1){
-                for(int i=0;i<openFile.occupy_block_num;++i){
-                    char content[BLOCK_SIZE];
-                    int c_size=min(BLOCK_SIZE,openFile.file_size-i*BLOCK_SIZE);
-                    fseek(f,openFile.direct_block[i],SEEK_SET);
-                    fread(content,sizeof(char),c_size,f);
-                    fflush(f);
-                    for(int i=0;i<c_size;++i)
-                    cout<<content[i];
-                }
+                for(int i=0;i<openFile.occupy_block_num;++i)
+                block_addr.push_back(openFile.direct_block[i]);
             }
+            else{
+                for(int i=0;i<DIRECT_BLOCK_NUM;++i)
+                block_addr.push_back(openFile.direct_block[i]);
+                int buffer[UNDIRECT_POINTER_BLOCK];
+                fseek(f,openFile.undirect_pointer_block,SEEK_SET);
+                fread(&buffer,sizeof(int),openFile.occupy_block_num-DIRECT_BLOCK_NUM,f);
+                fflush(f);
+                for(int i=0;i<openFile.occupy_block_num-DIRECT_BLOCK_NUM;++i)
+                block_addr.push_back(buffer[i]);
+
+            }
+            for(int i=0;i<openFile.occupy_block_num;++i){
+                char content[BLOCK_SIZE];
+                int c_size=min(BLOCK_SIZE,openFile.file_size-i*BLOCK_SIZE);
+                fseek(f,block_addr[i],SEEK_SET);
+                fread(content,sizeof(char),c_size,f);
+                fflush(f);
+                cout<<"The "<<i+1<<" block locate at "<<block_addr[i]<<endl<<"The content is : "<<endl;
+                for(int i=0;i<c_size;++i)
+                cout<<content[i];
+                cout<<"("<<c_size<<"*"<<content[0]<<")"<<endl<<"Print of "<<i+1<<" block end"<<endl<<endl;
+            }
+            
         }
     }
     cout<<endl<<"Print end"<<endl;
@@ -408,7 +494,6 @@ int changeDir(FILE*f,Inode* node){
         int result2=find_item(f,&path,filename,&openFile);
         if(result2==1){
             *node=openFile;
-            node->info_show();
             return 1;
         }
     }
@@ -419,9 +504,25 @@ int changeDir(FILE*f,Inode* node){
 
 int find_item(FILE* f,Inode* node,string filename,Inode* openFile){ //用于寻找当前目录是否有 “filename”项
     int item_num=node->file_size/DIRITEM_SIZE;
+    vector<int>block_addr;
+    if(node->undirect_pointer_block==-1){
+        for(int i=0;i<node->occupy_block_num;++i)
+        block_addr.push_back(node->direct_block[i]);
+    }
+    else{
+        for(int i=0;i<DIRECT_BLOCK_NUM;++i)
+        block_addr.push_back(node->direct_block[i]);
+        int buffer[UNDIRECT_POINTER_BLOCK];
+        fseek(f,node->undirect_pointer_block,SEEK_SET);
+        fread(&buffer,sizeof(int),node->occupy_block_num-DIRECT_BLOCK_NUM,f);
+        fflush(f);
+        for(int i=0;i<node->occupy_block_num-DIRECT_BLOCK_NUM;++i){
+            block_addr.push_back(buffer[i]);
+        }
+    }
     if(node->undirect_pointer_block==-1){
         for(int i=0;i<node->occupy_block_num;++i){
-            int block_st=node->direct_block[i];
+            int block_st=block_addr[i];
             int num=0;
             if(i==node->occupy_block_num-1) num=item_num%32;
             else num=32;
@@ -480,7 +581,6 @@ vector<string> split(string str,string pattern) {   //分割字符串，用于�
 }
 
 string getPath(FILE*f,Inode* node){
-    node->info_show();
     bool isRoot=node->isRoot;
     vector<string> path;
     string ans="";
@@ -498,8 +598,8 @@ string getPath(FILE*f,Inode* node){
         if(!isRoot) 
         id=para.para_Inode_id;
     }
-    cout<<"x"<<endl;
     for(int i=path.size()-1;i>=0;--i)
       ans=ans+"/"+path[i];
     return ans;
 }
+

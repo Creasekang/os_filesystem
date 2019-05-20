@@ -18,6 +18,8 @@
 #define INT_SIZE 32
 #define INODE_BITMAP_SIZE 96
 #define BLOCK_BITMAP_SIZE 500
+#define UNDIRECT_POINTER_BLOCK 1024/4
+
 #include<ctime>
 #include<string>
 #include<iostream>
